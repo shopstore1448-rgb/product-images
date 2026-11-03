@@ -236,11 +236,24 @@ def slug(s):
     return re.sub(r"\s+", "-", s.strip())
 
 # ------------------------------------------------------------------ main
-def main(job_path):
+def main(job_path, outdir="."):
     job = json.load(open(job_path, encoding="utf-8"))
+    os.chdir(outdir)
     b, sl = job["brand"], job["slug"]
-    bq = boutiqaat(job["boutiqaat_url"]) if job.get("boutiqaat_url") else {}
-    off = salla(job["official_url"]) if job.get("official_url") else {}
+    # Prefer data collected in the browser (Boutiqaat blocks servers); fall back to direct fetching.
+    if job.get("bq_json"):
+        bq = {str(p["id"]): p for p in json.load(open(job["bq_json"], encoding="utf-8"))}
+        log("boutiqaat (browser data):", len(bq), "available:", sum(p["avail"] for p in bq.values()))
+    else:
+        bq = boutiqaat(job["boutiqaat_url"]) if job.get("boutiqaat_url") else {}
+    if job.get("off_json"):
+        off = {str(p["id"]): p for p in json.load(open(job["off_json"], encoding="utf-8"))}
+        from collections import Counter
+        c = Counter(u for p in off.values() for u in p.get("imgs", []))
+        for p in off.values(): p["imgs"] = [u for u in p.get("imgs", []) if c[u] <= 2 and "form-builder" not in u][:8]
+        log("official (browser data):", len(off), "available:", sum(p["avail"] for p in off.values()))
+    else:
+        off = salla(job["official_url"]) if job.get("official_url") else {}
 
     # match each official product to a Boutiqaat product (same type + same size + name tokens)
     B = {k: (kind(clean_name(p["name"], b)), size(p["name"]), toks(p["name"], b)) for k, p in bq.items()}
@@ -308,4 +321,4 @@ def main(job_path):
     log(json.dumps({k: v for k, v in summary.items() if k != "log"}, ensure_ascii=False, default=dict))
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(os.path.abspath(sys.argv[1]), sys.argv[2] if len(sys.argv) > 2 else ".")
