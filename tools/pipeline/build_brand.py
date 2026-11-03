@@ -126,13 +126,14 @@ def salla(url):
 
 # ------------------------------------------------------------------ names, types, categories
 SYN = [("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"), ("ة", "ه"), ("جراي", "غراي"), ("بريستيج", "برستيج"), ("سيكرت", "سكريت"), ("سيكريت", "سكريت"),
-       ("جلو", "غلو"), ("كوير", "كواير"), ("بوازيه", "بويزيه"), ("بوازية", "بويزيه"), ("جرام", "غ"), ("جم", "غ"), ("غم", "غ"), ("ربع توله", "3مل"), ("نصف توله", "6مل"),
+       ("جلو", "غلو"), ("كوير", "كواير"), ("بوازيه", "بويزيه"), ("بوازية", "بويزيه"), ("ربع توله", "3مل"), ("نصف توله", "6مل"),
        ("الإرث", "الارث"), ("ليدى", "ليدي")]
-STOP = set("عطر المركز من مجموعه او دو بارفيوم تواليت للعود مل غ - حبه حبات قطع و كلاسيك ليدي برستيج الارث ليغاسي تشكيله عالي التركيز المخفف مستخلص اكستريت للجسم والملابس".split())
+STOP = set("دخون بخور انسنس دهن خمريه الجسم للجسم الملابس شاور جل غسول واليدين لوشن بودي مرطب زيت موزع عطري جهاز تعطير فواحه اعواد مع معطر الجو جو رذاذ والجسم الشعر للشعر بخاخ سبراي اول اوفر افر للسياره سيارات سياره عبوه اعاده تعبئه هديه هدايا بوكس عطر المركز من مجموعه او دو بارفيوم تواليت للعود مل غ - حبه حبات قطع و كلاسيك ليدي برستيج الارث ليغاسي تشكيله عالي التركيز المخفف مستخلص اكستريت للجسم والملابس".split())
 
 def norm(s):
     for a, b in SYN: s = s.replace(a, b)
-    return re.sub(r"(\d+)\s*(مل|غ)", r" \1\2 ", s)
+    s = re.sub(r"(\d+)\s*(جرام|جم|غم|غرام|غ)(?![\u0600-\u06FF])", r" \1غ ", s)
+    return re.sub(r"(\d+)\s*(مل)", r" \1\2 ", s)
 def size(s):
     m = re.findall(r"(\d+)(مل|غ)", norm(s)); return m[-1] if m else None
 def toks(s, brand):
@@ -143,6 +144,9 @@ def kind(n):
     if "زعفران" in n: return "saffron"
     if "توزيعات" in n: return "eid"
     if "زيت موزع" in n or "زيت جهاز" in n or "زيت فواحة" in n: return "diffoil"
+    if "سيار" in n: return "car"
+    if any(w in n for w in ["بوكس", "صندوق"]): return "set"
+    if "اكسير" in n or "إكسير" in n: return "poil"
     if any(w in n for w in ["بوكس", "صندوق", "مجموعة عطر", "مجموعة هدايا", "طقم", "× ", " x "]) or re.match(r"^مجموعة\s", n): return "set"
     if "سيار" in n: return "car"
     if "جهاز" in n: return "device"
@@ -182,9 +186,10 @@ def category(n, t):
             "cream": ("العناية بالجسم والاستحمام", "العناية باليدين والقدمين"), "saffron": ("المنزل والمطبخ", "الضيافة والتقديم"), "eid": ("الهدايا والمجموعات", "الهدايا")}[t]
 
 def clean_name(n, brand):
-    n = n.replace(brand + " - ", "").replace(" من " + brand, "").replace(brand, "").strip(" -")
+    n = n.replace(" من " + brand, "").replace(brand + " - ", "").replace(brand, "").strip(" -")
+    n = n.replace("عالي التركيز", "المركز").replace("سيارات", "سيارات ").replace("مبخره", "مبخرة").replace("من تشكيلة", "من مجموعة").replace("الارث", "الإرث")
     n = re.sub(r"\s*(او|أو) دو (بارفيوم|تواليت)|\s*اكستريت دي? بارفيوم|\s*اكستريت دو بارفيوم", "", n)
-    n = n.replace("ليدى", "ليدي").replace("عطرى", "عطري").replace("بودى", "بودي").replace("تشكيلة", "مجموعة")
+    n = n.replace("ليدى", "ليدي").replace("عطرى", "عطري").replace("بودى", "بودي")
     m = re.search(r"\s(\d+)\s?(مل|جم|جرام|غم|غ)$", n)
     if m and " - " not in n:
         n = n[:m.start()] + f" - {m.group(1)} {'مل' if m.group(2) == 'مل' else 'غ'}"
@@ -262,8 +267,12 @@ def main(job_path, outdir="."):
         t, sz, tk = kind(clean_name(o["name"], b)), size(o["name"]), toks(o["name"], b)
         best = (0, None)
         for k, (bt, bs, btk) in B.items():
-            if bt != t or bs != sz or not tk or not btk: continue
+            if bt != t or (bs != sz and t != "set") or not tk or not btk: continue
             j = len(tk & btk) / len(tk | btk)
+            QUAL = {"الممتاز", "الملكي", "ملكي", "الخاص", "خاص", "الفاخر", "فاخر", "فاخره", "نادر", "عتيق", "سوبر", "ممتاز", "مبسوس", "معمول"}
+            if t != "set" and (tk <= btk or btk <= tk) and not ((tk ^ btk) & QUAL): j = max(j, 0.6)
+            if t == "set" and j < 0.75: continue
+            if (tk ^ btk) & QUAL and j < 0.75: continue
             if j > best[0]: best = (j, k)
         if best[1] and (best[0] >= 0.5 or (best[0] >= 0.34 and len(tk & B[best[1]][2]) >= 1 and len(tk) <= 2)):
             matches[oid] = best
@@ -279,9 +288,13 @@ def main(job_path, outdir="."):
             o = off[matched_bq[k][1]]
             items.append(dict(src="الموقع الرسمي (غير متوفر في بوتيكات)", sku=p["sku"], name=clean_name(p["name"], b), cost=o["price"], desc=p.get("desc") or o.get("desc", ""),
                               srcimgs=p.get("imgs") or o.get("imgs", []), match=f"{o['name']} ({matched_bq[k][0]:.2f})"))
+    avail_bq = {k: B[k] for k, p in bq.items() if p["avail"]}
     for oid, o in off.items():
         if not o["avail"] or oid in matches: continue
-        items.append(dict(src="الموقع الرسمي فقط", sku=f"OFF-{sl}-{oid}"[:40], name=clean_name(o["name"], b), cost=o["price"], desc=o.get("desc", ""), srcimgs=o.get("imgs", []), match=""))
+        t, tk = kind(clean_name(o["name"], b)), toks(o["name"], b)
+        near = max(((len(tk & v[2]) / max(1, len(tk | v[2])), k) for k, v in avail_bq.items() if v[0] == t), default=(0, None))
+        note = f"قد يكون مكررًا مع: {bq[near[1]]['name']}" if near[0] >= 0.5 else ""
+        items.append(dict(src="الموقع الرسمي فقط", sku=f"OFF-{sl}-{oid}"[:40], name=clean_name(o["name"], b), cost=o["price"], desc=o.get("desc", ""), srcimgs=o.get("imgs", []), match="", note=note))
     items = [it for it in items if it["srcimgs"]] + [dict(it, skipped=True) for it in items if not it["srcimgs"]]
 
     wb = openpyxl.load_workbook(os.path.join(HERE, "salla_template.xlsx")); ws = wb.active
@@ -308,8 +321,13 @@ def main(job_path, outdir="."):
                 rnd(c * 1.25 + 30), None, "لا", "الخدمات المالية", "لا"]
         for j, v in enumerate(vals): ws.cell(row=row, column=j + 1, value=v)
         row += 1
-        w2.append([it["sku"], title, it["src"], rnd(c), rnd(c * 1.5 + 100), rnd(c * 1.25 + 30), ",".join(cat), len(urls), it["match"], ""])
+        note = it.get("note", "") or ("اسم ناقص - راجعه" if not toks(nm, b) else "")
+        w2.append([it["sku"], title, it["src"], rnd(c), rnd(c * 1.5 + 100), rnd(c * 1.25 + 30), ",".join(cat), len(urls), it["match"], note])
         manifest += [[u, p] for u, p in zip(it["srcimgs"], paths)]
+    w3 = rv.create_sheet("مطابقات الموقع الرسمي"); w3.sheet_view.rightToLeft = True
+    w3.append(["منتج الموقع الرسمي", "مطابق مع بوتيكات", "درجة التطابق", "متوفر في بوتيكات"])
+    for oid, (sc, k) in sorted(matches.items(), key=lambda x: x[1][0]):
+        w3.append([off[oid]["name"], bq[k]["name"], round(sc, 2), "نعم" if bq[k]["avail"] else "لا"])
     os.makedirs(f"output/{sl}", exist_ok=True)
     wb.save(f"output/{sl}/import.xlsx"); rv.save(f"output/{sl}/review.xlsx")
     json.dump(manifest, open(f"manifests/{sl}.json", "w", encoding="utf-8"), ensure_ascii=False, indent=0)
