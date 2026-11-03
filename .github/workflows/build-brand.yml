@@ -1,0 +1,31 @@
+name: build-brand
+on:
+  push:
+    paths: ["jobs/*.json"]
+  workflow_dispatch:
+    inputs:
+      job: { description: "job file path", required: true }
+permissions:
+  contents: write
+concurrency: build-brand
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 2 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pillow openpyxl
+      - name: build changed jobs
+        run: |
+          if [ -n "${{ github.event.inputs.job }}" ]; then FILES="${{ github.event.inputs.job }}"; else FILES=$(git diff --name-only HEAD~1 HEAD -- 'jobs/*.json'); fi
+          for f in $FILES; do echo "== $f"; python tools/pipeline/build_brand.py "$f"; done
+      - run: python tools/fetch_images.py
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output manifests images
+          git diff --cached --quiet || git commit -m "Build brand output"
+          git pull --rebase origin main && git push
